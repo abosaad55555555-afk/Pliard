@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3D Billiards — Advanced Physics</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: radial-gradient(ellipse at center, #1a0f08 0%, #000 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Georgia', serif;
+    color: #e8d9b0;
+    padding: 15px;
+    user-select: none;
+  }
+  h1 {
+    font-size: 26px;
+    letter-spacing: 8px;
+    margin-bottom: 8px;
+    color: #d4af37;
+    text-shadow: 0 2px 10px rgba(212,175,55,0.5);
+    font-variant: small-caps;
+  }
+  .info {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 10px;
+    background: linear-gradient(180deg, #2a1810, #0a0604);
+    padding: 10px 25px;
+    border-radius: 8px;
+    border: 1px solid #5a3a20;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+    font-size: 13px;
+  }
+  .player {
+    padding: 6px 14px;
+    border-radius: 6px;
+    transition: all 0.3s;
+    border: 1px solid transparent;
+  }
+  .player.active {
+    background: linear-gradient(180deg, #8b0000, #4a0000);
+    border-color: #d4af37;
+    box-shadow: 0 0 20px rgba(212,175,55,0.5);
+  }
+  .player .label { font-weight: bold; color: #d4af37; }
+  .player .type { font-size: 11px; opacity: 0.7; margin-left: 6px; }
+  .player .balls { display: inline-flex; gap: 2px; margin-left: 8px; vertical-align: middle; }
+  .mini-ball {
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1px solid rgba(0,0,0,0.5);
+    box-shadow: inset -1px -1px 2px rgba(0,0,0,0.4), inset 1px 1px 2px rgba(255,255,255,0.3);
+  }
+  canvas {
+    border-radius: 4px;
+    box-shadow: 0 25px 80px rgba(0,0,0,0.9), 0 0 0 5px #2a1810, 0 0 0 6px #5a3a20;
+    cursor: crosshair;
+    max-width: 95vw;
+    height: auto;
+  }
+  .msg {
+    margin-top: 10px;
+    min-height: 22px;
+    font-size: 14px;
+    color: #d4af37;
+    text-align: center;
+    font-style: italic;
+  }
+  .controls {
+    margin-top: 6px;
+    font-size: 11px;
+    opacity: 0.6;
+  }
+  button {
+    margin-top: 8px;
+    padding: 7px 18px;
+    background: linear-gradient(180deg, #8b0000, #4a0000);
+    border: 1px solid #d4af37;
+    color: #d4af37;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    letter-spacing: 2px;
+  }
+  button:hover { background: linear-gradient(180deg, #a00000, #600000); }
+  .spin-control {
+    margin-top: 8px;
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    font-size: 12px;
+  }
+  .spin-indicator {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #fff, #ccc);
+    border: 2px solid #d4af37;
+    position: relative;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+  }
+  .spin-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #e74c3c;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 5px rgba(231,76,60,0.8);
+  }
+</style>
+</head>
+<body>
+  <h1>◆ 3D BILLIARDS ◆</h1>
+  <div class="info">
+    <div class="player active" id="p1">
+      <span class="label">Player 1</span><span class="type" id="p1type"></span>
+      <span class="balls" id="p1balls"></span>
+    </div>
+    <div class="player" id="p2">
+      <span class="label">Player 2</span><span class="type" id="p2type"></span>
+      <span class="balls" id="p2balls"></span>
+    </div>
+  </div>
+  <canvas id="game" width="1000" height="520"></canvas>
+  <div class="spin-control">
+    <div class="spin-indicator" id="spinCtrl">
+      <div class="spin-dot" id="spinDot"></div>
+    </div>
+    <span>Click cue ball to set spin • Drag backward to shoot</span>
+  </div>
+  <div class="msg" id="msg">Player 1 breaks — drag from the cue ball to shoot</div>
+  <div class="controls">Advanced physics: spin, throw, swerve, 3D rendering</div>
+  <button onclick="resetGame()">New Rack</button>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ===== CONSTANTS =====
+const RAIL = 38;
+const PLAY_L = RAIL, PLAY_R = W - RAIL;
+const PLAY_T = RAIL, PLAY_B = H - RAIL;
+const PLAY_W = PLAY_R - PLAY_L;
+const PLAY_H = PLAY_B - PLAY_T;
+
+const BALL_R = 12;
+const POCKET_R = 23;
+const SIDE_POCKET_R = 21;
+
+// Physics
+const SUBSTEPS = 10;
+const RESTITUTION_BALL = 0.96;
+const RESTITUTION_CUSHION = 0.75;
+const ROLLING_FRICTION = 0.015;
+const SLIDING_FRICTION = 0.2;
+const SPIN_FRICTION = 0.96;
+const THROW_FACTOR = 0.08;
+const MIN_SPEED = 0.03;
+
+// Light source (for 3D shading)
+const LIGHT = { x: W * 0.3, y: -200, z: 400 };
+
+const pockets = [
+  {x: PLAY_L, y: PLAY_T, r: POCKET_R},
+  {x: W/2, y: PLAY_T-2, r: SIDE_POCKET_R},
+  {x: PLAY_R, y: PLAY_T, r: POCKET_R},
+  {x: PLAY_L, y: PLAY_B, r: POCKET_R},
+  {x: W/2, y: PLAY_B+2, r: SIDE_POCKET_R},
+  {x: PLAY_R, y: PLAY_B, r: POCKET_R}
+];
+
+const BALL_COLORS = {
+  1: '#f4c430', 2: '#1e4d8c', 3: '#c8373a', 4: '#4b2e6e',
+  5: '#d97a2b', 6: '#1f6b3a', 7: '#7a2020', 8: '#0a0a0a',
+  9: '#f4c430', 10: '#1e4d8c', 11: '#c8373a', 12: '#4b2e6e',
+  13: '#d97a2b', 14: '#1f6b3a', 15: '#7a2020'
+};
+
+// ===== AUDIO =====
+let audioCtx;
+function initAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function playHit(intensity) {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 2000 + Math.random()*500;
+  filter.Q.value = 5;
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(500 + Math.random()*150, now);
+  osc.frequency.exponentialRampToValueAtTime(150, now + 0.1);
+  const vol = Math.min(0.4, intensity * 0.05);
+  gain.gain.setValueAtTime(vol, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+  osc.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(now); osc.stop(now + 0.16);
+}
+function playPocket() {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(200, now);
+  osc.frequency.exponentialRampToValueAtTime(70, now + 0.3);
+  gain.gain.setValueAtTime(0.35, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.start(now); osc.stop(now + 0.36);
+}
+function playCushion(intensity) {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const bufferSize = audioCtx.sampleRate * 0.1;
+  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/bufferSize, 2.5);
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 700;
+  const gain = audioCtx.createGain();
+  gain.gain.value = Math.min(0.3, intensity * 0.04);
+  src.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+  src.start(now);
+}
+
+// ===== GAME STATE =====
+let balls = [];
+let currentPlayer = 1;
+let playerTypes = {1: null, 2: null};
+let aiming = false;
+let aimStart = null;
+let aimCurrent = null;
+let moving = false;
+let firstHit = null;
+let pocketedThisTurn = [];
+let scratchThisTurn = false;
+let gameOver = false;
+let ballInHand = false;
+let breakShot = true;
+
+// Spin state (for cue ball only)
+let cueSpin = { x: 0, y: 0 }; // x = side english, y = top(+)/back(-) spin
+
+function createBalls() {
+  balls = [];
+  balls.push({
+    x: PLAY_L + PLAY_W * 0.25,
+    y: PLAY_T + PLAY_H / 2,
+    vx: 0, vy: 0,
+    num: 0, inPlay: true,
+    spin: { x: 0, y: 0 }, // side, top/back
+    rotX: 0, rotY: 0, rotZ: 0, // 3D rotation angles
+    angularVel: { x: 0, y: 0, z: 0 } // angular velocity
+  });
+
+  const footX = PLAY_L + PLAY_W * 0.73;
+  const footY = PLAY_T + PLAY_H / 2;
+  const d = BALL_R * 2 + 0.3;
+  const rowDx = d * Math.cos(Math.PI/6);
+  const arrangement = [
+    [1],
+    [11, 2],
+    [9, 8, 10],
+    [7, 12, 14, 3],
+    [13, 5, 15, 4, 6]
+  ];
+  for (let row = 0; row < arrangement.length; row++) {
+    const cols = arrangement[row];
+    const rx = footX + row * rowDx;
+    for (let c = 0; c < cols.length; c++) {
+      const ry = footY + (c - (cols.length-1)/2) * d;
+      balls.push({
+        x: rx, y: ry, vx: 0, vy: 0,
+        num: cols[c], inPlay: true,
+        spin: { x: 0, y: 0 },
+        rotX: Math.random() * Math.PI * 2,
+        rotY: Math.random() * Math.PI * 2,
+        rotZ: 0,
+        angularVel: { x: 0, y: 0, z: 0 }
+      });
+    }
+  }
+}
+
+function resetGame() {
+  initAudio();
+  createBalls();
+  currentPlayer = 1;
+  playerTypes = {1: null, 2: null};
+  gameOver = false;
+  moving = false;
+  aiming = false;
+  ballInHand = false;
+  breakShot = true;
+  cueSpin = { x: 0, y: 0 };
+  updateSpinIndicator();
+  updateUI();
+  setMsg("Player 1 breaks — drag from the cue ball to shoot");
+}
+
+function updateUI() {
+  document.getElementById('p1').classList.toggle('active', currentPlayer === 1);
+  document.getElementById('p2').classList.toggle('active', currentPlayer === 2);
+  document.getElementById('p1type').textContent = playerTypes[1] ? `(${playerTypes[1]}s)` : '';
+  document.getElementById('p2type').textContent = playerTypes[2] ? `(${playerTypes[2]}s)` : '';
+  document.getElementById('p1balls').innerHTML = renderMiniBalls(1);
+  document.getElementById('p2balls').innerHTML = renderMiniBalls(2);
+}
+
+function renderMiniBalls(player) {
+  const type = playerTypes[player];
+  if (!type) return '<span style="opacity:0.5;font-size:11px">—</span>';
+  const nums = type === 'solid' ? [1,2,3,4,5,6,7] : [9,10,11,12,13,14,15];
+  return nums.map(n => {
+    const inPlay = balls.find(b => b.num === n && b.inPlay);
+    const color = BALL_COLORS[n];
+    return `<span class="mini-ball" style="background:${color};opacity:${inPlay?1:0.25}"></span>`;
+  }).join('');
+}
+
+function setMsg(text) { document.getElementById('msg').textContent = text; }
+
+// ===== 3D DRAWING =====
+function drawTable() {
+  // Wood frame with 3D bevel
+  const woodGrad = ctx.createLinearGradient(0, 0, 0, H);
+  woodGrad.addColorStop(0, '#6a4428');
+  woodGrad.addColorStop(0.3, '#8a5a38');
+  woodGrad.addColorStop(0.7, '#5a3820');
+  woodGrad.addColorStop(1, '#3a2410');
+  ctx.fillStyle = woodGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Wood grain
+  ctx.strokeStyle = 'rgba(30,15,5,0.25)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 25; i++) {
+    ctx.beginPath();
+    const y = (i/25) * H;
+    ctx.moveTo(0, y);
+    ctx.bezierCurveTo(W*0.3, y + Math.sin(i*0.7)*4, W*0.7, y - Math.sin(i*0.7)*4, W, y);
+    ctx.stroke();
+  }
+
+  // Inner frame shadow
+  ctx.fillStyle = '#1a0a04';
+  ctx.fillRect(RAIL-8, RAIL-8, W-2*(RAIL-8), H-2*(RAIL-8));
+
+  // Felt with cloth texture
+  const feltGrad = ctx.createRadialGradient(W/2, H/2, 100, W/2, H/2, 600);
+  feltGrad.addColorStop(0, '#1e8a52');
+  feltGrad.addColorStop(1, '#0d5a33');
+  ctx.fillStyle = feltGrad;
+  ctx.fillRect(PLAY_L, PLAY_T, PLAY_W, PLAY_H);
+
+  // Cloth nap (directional texture)
+  ctx.save();
+  ctx.globalAlpha = 0.06;
+  for (let i = 0; i < 300; i++) {
+    const x = PLAY_L + Math.random()*PLAY_W;
+    const y = PLAY_T + Math.random()*PLAY_H;
+    ctx.fillStyle = Math.random() > 0.5 ? '#000' : '#fff';
+    ctx.fillRect(x, y, 1, 1);
+  }
+  ctx.restore();
+
+  // Cushion 3D effect
+  ctx.strokeStyle = 'rgba(255,220,150,0.2)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(PLAY_L+1, PLAY_T+1, PLAY_W-2, PLAY_H-2);
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(PLAY_L, PLAY_T, PLAY_W, PLAY_H);
+
+  // Pockets with depth
+  pockets.forEach((p, i) => {
+    // Outer rim
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r + 4, 0, Math.PI*2);
+    ctx.fillStyle = '#0a0402';
+    ctx.fill();
+    
+    // Inner hole with gradient depth
+    const pg = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+    pg.addColorStop(0, '#000');
+    pg.addColorStop(0.7, '#0a0402');
+    pg.addColorStop(1, '#1a0a04');
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+    ctx.fillStyle = pg;
+    ctx.fill();
+    
+    // Highlight rim
+    ctx.strokeStyle = 'rgba(212,175,55,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+
+  // Head string
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.setLineDash([4, 6]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(PLAY_L + PLAY_W * 0.25, PLAY_T);
+  ctx.lineTo(PLAY_L + PLAY_W * 0.25, PLAY_B);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Foot spot
+  ctx.beginPath();
+  ctx.arc(PLAY_L + PLAY_W * 0.73, PLAY_T + PLAY_H/2, 2.5, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.fill();
+
+  // Diamonds
+  ctx.fillStyle = 'rgba(212,175,55,0.6)';
+  for (let i = 1; i < 4; i++) {
+    const x = PLAY_L + (PLAY_W * i / 4);
+    drawDiamond(x, RAIL/2, 3);
+    drawDiamond(x, H - RAIL/2, 3);
+  }
+  for (let i = 1; i < 2; i++) {
+    const y = PLAY_T + (PLAY_H * i / 2);
+    drawDiamond(RAIL/2, y, 3);
+    drawDiamond(W - RAIL/2, y, 3);
+  }
+}
+
+function drawDiamond(x, y, s) {
+  ctx.beginPath();
+  ctx.moveTo(x, y-s);
+  ctx.lineTo(x+s, y);
+  ctx.lineTo(x, y+s);
+  ctx.lineTo(x-s, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// 3D Ball rendering with proper sphere shading
+function drawBall3D(b) {
+  if (!b.inPlay) return;
+
+  const x = b.x, y = b.y;
+
+  // Calculate light direction to ball
+  const dx = LIGHT.x - x;
+  const dy = LIGHT.y - y;
+  const dz = LIGHT.z;
+  const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  const lightDir = { x: dx/dist, y: dy/dist, z: dz/dist };
+
+  // Shadow (projected based on light)
+  const shadowOffsetX = (x - LIGHT.x) * 0.02;
+  const shadowOffsetY = (y - LIGHT.y) * 0.02 + 5;
+  ctx.beginPath();
+  ctx.ellipse(x + shadowOffsetX, y + shadowOffsetY, BALL_R * 0.9, BALL_R * 0.5, 0, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fill();
+
+  if (b.num === 0) {
+    // Cue ball - pearlescent white with 3D shading
+    drawSphere(x, y, BALL_R, '#ffffff', '#e8e8e8', '#a0a0a0', lightDir, b);
+  } else {
+    const isStripe = b.num >= 9;
+    const color = BALL_COLORS[b.num];
+
+    if (isStripe) {
+      // White base with 3D shading
+      drawSphere(x, y, BALL_R, '#ffffff', '#e0e0e0', '#909090', lightDir, b);
+      
+      // Colored stripe (rotates with ball)
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, BALL_R, 0, Math.PI*2);
+      ctx.clip();
+      
+      // Rotate stripe based on ball rotation
+      ctx.translate(x, y);
+      ctx.rotate(b.rotZ);
+      
+      // Draw stripe with 3D shading
+      const stripeGrad = ctx.createLinearGradient(0, -BALL_R*0.6, 0, BALL_R*0.6);
+      stripeGrad.addColorStop(0, lighten(color, 30));
+      stripeGrad.addColorStop(0.5, color);
+      stripeGrad.addColorStop(1, darken(color, 30));
+      ctx.fillStyle = stripeGrad;
+      ctx.fillRect(-BALL_R, -BALL_R*0.55, BALL_R*2, BALL_R*1.1);
+      
+      ctx.restore();
+      
+      // Re-apply 3D shading on top
+      const highlight = ctx.createRadialGradient(
+        x - BALL_R*0.3, y - BALL_R*0.3, 0,
+        x, y, BALL_R
+      );
+      highlight.addColorStop(0, 'rgba(255,255,255,0.4)');
+      highlight.addColorStop(0.5, 'rgba(255,255,255,0)');
+      highlight.addColorStop(1, 'rgba(0,0,0,0.3)');
+      ctx.fillStyle = highlight;
+      ctx.beginPath();
+      ctx.arc(x, y, BALL_R, 0, Math.PI*2);
+      ctx.fill();
+    } else {
+      // Solid ball with 3D shading
+      drawSphere(x, y, BALL_R, lighten(color, 40), color, darken(color, 50), lightDir, b);
+    }
+
+    // Number circle (3D embossed look)
+    const numR = BALL_R * 0.45;
+    ctx.beginPath();
+    ctx.arc(x, y, numR, 0, Math.PI*2);
+    const numGrad = ctx.createRadialGradient(x - numR*0.3, y - numR*0.3, 0, x, y, numR);
+    numGrad.addColorStop(0, '#ffffff');
+    numGrad.addColorStop(1, '#d0d0d0');
+    ctx.fillStyle = numGrad;
+    ctx.fill();
+    
+    // Number shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.font = 'bold 10px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.num, x + 0.5, y + 1);
+    
+    // Number
+    ctx.fillStyle = '#000';
+    ctx.fillText(b.num, x, y);
+  }
+
+  // Specular highlight (moves with rotation)
+  const specX = x - BALL_R*0.4 + Math.sin(b.rotZ) * 2;
+  const specY = y - BALL_R*0.4 + Math.cos(b.rotZ) * 2;
+  const specGrad = ctx.createRadialGradient(specX, specY, 0, specX, specY, BALL_R*0.25);
+  specGrad.addColorStop(0, 'rgba(255,255,255,0.95)');
+  specGrad.addColorStop(0.5, 'rgba(255,255,255,0.3)');
+  specGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = specGrad;
+  ctx.beginPath();
+  ctx.arc(specX, specY, BALL_R*0.25, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawSphere(x, y, r, lightColor, midColor, darkColor, lightDir, ball) {
+  // Main sphere gradient based on light direction
+  const highlightX = x - r * 0.35 * lightDir.x;
+  const highlightY = y - r * 0.35 * lightDir.y;
+  
+  const grad = ctx.createRadialGradient(highlightX, highlightY, 0, x, y, r);
+  grad.addColorStop(0, lightColor);
+  grad.addColorStop(0.5, midColor);
+  grad.addColorStop(1, darkColor);
+  
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function lighten(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, (n >> 16) + amt);
+  const g = Math.min(255, ((n >> 8) & 0xff) + amt);
+  const b = Math.min(255, (n & 0xff) + amt);
+  return `rgb(${r},${g},${b})`;
+}
+function darken(hex, amt) { return lighten(hex, -amt); }
+
+function drawAim() {
+  const cue = balls[0];
+  if (!cue.inPlay || !aiming) return;
+
+  const dx = aimStart.x - aimCurrent.x;
+  const dy = aimStart.y - aimCurrent.y;
+  const power = Math.min(Math.hypot(dx, dy), 220);
+  const angle = Math.atan2(dy, dx);
+  const dirX = Math.cos(angle), dirY = Math.sin(angle);
+
+  // Ghost-ball prediction
+  let hitBall = null, hitDist = Infinity, hitX, hitY;
+  for (const b of balls) {
+    if (b.num === 0 || !b.inPlay) continue;
+    const ex = b.x - cue.x, ey = b.y - cue.y;
+    const proj = ex * dirX + ey * dirY;
+    if (proj < 0) continue;
+    const perpSq = ex*ex + ey*ey - proj*proj;
+    const r2 = (BALL_R*2) * (BALL_R*2);
+    if (perpSq < r2) {
+      const back = Math.sqrt(r2 - perpSq);
+      const d = proj - back;
+      if (d > 0 && d < hitDist) {
+        hitDist = d;
+        hitBall = b;
+        hitX = cue.x + dirX * d;
+        hitY = cue.y + dirY * d;
+      }
+    }
+  }
+
+  // Aim line
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.setLineDash([3, 5]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cue.x, cue.y);
+  const lineEnd = hitBall ? hitDist : 500;
+  ctx.lineTo(cue.x + dirX * lineEnd, cue.y + dirY * lineEnd);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Ghost ball
+  if (hitBall) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(hitX, hitY, BALL_R, 0, Math.PI*2);
+    ctx.stroke();
+    
+    // Target direction
+    const tdx = hitBall.x - hitX, tdy = hitBall.y - hitY;
+    const td = Math.hypot(tdx, tdy);
+    if (td > 0) {
+      ctx.strokeStyle = 'rgba(255,200,100,0.5)';
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath();
+      ctx.moveTo(hitBall.x, hitBall.y);
+      ctx.lineTo(hitBall.x + (tdx/td) * 80, hitBall.y + (tdy/td) * 80);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // 3D Cue stick
+  const stickLen = 280;
+  const pullBack = (power / 220) * 60;
+  const tipOffset = BALL_R + 5 + pullBack;
+  const tipX = cue.x - dirX * tipOffset;
+  const tipY = cue.y - dirY * tipOffset;
+  const endX = tipX - dirX * stickLen;
+  const endY = tipY - dirY * stickLen;
+
+  // Stick shadow
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.lineWidth = 8;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(tipX + 2, tipY + 4);
+  ctx.lineTo(endX + 2, endY + 4);
+  ctx.stroke();
+
+  // Stick body with 3D taper
+  const shaftGrad = ctx.createLinearGradient(tipX, tipY, endX, endY);
+  shaftGrad.addColorStop(0, '#f0d8a8');
+  shaftGrad.addColorStop(0.2, '#e8c896');
+  shaftGrad.addColorStop(0.5, '#c49a6c');
+  shaftGrad.addColorStop(1, '#2a1808');
+  ctx.strokeStyle = shaftGrad;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+
+  // Highlight on stick
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+
+  // Ferrule
+  ctx.strokeStyle = '#f5f0e0';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - dirX * 7, tipY - dirY * 7);
+  ctx.stroke();
+
+  // Tip
+  ctx.strokeStyle = '#2a5a8a';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - dirX * 2, tipY - dirY * 2);
+  ctx.stroke();
+
+  // Power meter
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(20, H - 32, 220, 16);
+  const p = power / 220;
+  const pColor = p < 0.35 ? '#4a8' : p < 0.7 ? '#d97' : '#c44';
+  ctx.fillStyle = pColor;
+  ctx.fillRect(22, H - 30, p * 216, 12);
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(20, H - 32, 220, 16);
+  ctx.fillStyle = '#d4af37';
+  ctx.font = '10px Georgia';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('POWER', 24, H - 42);
+}
+
+function drawBallInHandIndicator() {
+  if (!ballInHand) return;
+  const cue = balls[0];
+  ctx.strokeStyle = 'rgba(212,175,55,0.8)';
+  ctx.setLineDash([3, 3]);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cue.x, cue.y, BALL_R + 7, 0, Math.PI*2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#d4af37';
+  ctx.font = 'italic 11px Georgia';
+  ctx.textAlign = 'center';
+  ctx.fillText('ball in hand — click to place', cue.x, cue.y - BALL_R - 14);
+}
+
+// ===== ADVANCED PHYSICS =====
+function physicsStep(dt) {
+  for (const b of balls) {
+    if (!b.inPlay) continue;
+    if (b.vx === 0 && b.vy === 0) continue;
+
+    const speed = Math.hypot(b.vx, b.vy);
+    
+    // Apply spin effects (swerve/curve for cue ball)
+    if (b.num === 0 && (b.spin.x !== 0 || b.spin.y !== 0)) {
+      // Side spin causes curve (swerve)
+      const sideSpinForce = b.spin.x * 0.0008;
+      b.vx += -b.vy * sideSpinForce;
+      b.vy += b.vx * sideSpinForce;
+      
+      // Top/back spin affects speed
+      const forwardSpinForce = b.spin.y * 0.001;
+      b.vx += b.vx / speed * forwardSpinForce;
+      b.vy += b.vy / speed * forwardSpinForce;
+    }
+
+    // Rolling vs sliding friction
+    if (speed > 2) {
+      // Sliding friction (higher)
+      const decel = SLIDING_FRICTION * dt;
+      const newSpeed = Math.max(0, speed - decel);
+      const ratio = newSpeed / speed;
+      b.vx *= ratio;
+      b.vy *= ratio;
+    } else {
+      // Rolling friction (lower)
+      const decel = ROLLING_FRICTION * dt;
+      const newSpeed = Math.max(0, speed - decel);
+      if (newSpeed === 0) {
+        b.vx = b.vy = 0;
+      } else {
+        const ratio = newSpeed / speed;
+        b.vx *= ratio;
+        b.vy *= ratio;
+      }
+    }
+
+    // Spin decay
+    b.spin.x *= SPIN_FRICTION;
+    b.spin.y *= SPIN_FRICTION;
+    if (Math.abs(b.spin.x) < 0.01) b.spin.x = 0;
+    if (Math.abs(b.spin.y) < 0.01) b.spin.y = 0;
+
+    // Update position
+    b.x += b.vx;
+    b.y += b.vy;
+
+    // Update 3D rotation based on velocity
+    if (speed > MIN_SPEED) {
+      const rotSpeed = speed * 0.08;
+      b.rotZ += rotSpeed * dt;
+      // Calculate rotation axis from velocity direction
+      const velAngle = Math.atan2(b.vy, b.vx);
+      b.rotX = Math.cos(velAngle) * rotSpeed * dt;
+      b.rotY = Math.sin(velAngle) * rotSpeed * dt;
+    }
+
+    // Cushion collisions with spin transfer
+    if (b.x - BALL_R < PLAY_L) {
+      b.x = PLAY_L + BALL_R;
+      const impact = Math.abs(b.vx);
+      b.vx = -b.vx * RESTITUTION_CUSHION;
+      // Side spin affects bounce angle
+      b.vy += b.spin.x * 0.3;
+      b.spin.x *= -0.5; // Spin reversal on cushion
+      if (impact > 0.5) playCushion(impact);
+    }
+    if (b.x + BALL_R > PLAY_R) {
+      b.x = PLAY_R - BALL_R;
+      const impact = Math.abs(b.vx);
+      b.vx = -b.vx * RESTITUTION_CUSHION;
+      b.vy += b.spin.x * 0.3;
+      b.spin.x *= -0.5;
+      if (impact > 0.5) playCushion(impact);
+    }
+    if (b.y - BALL_R < PLAY_T) {
+      b.y = PLAY_T + BALL_R;
+      const impact = Math.abs(b.vy);
+      b.vy = -b.vy * RESTITUTION_CUSHION;
+      b.vx += b.spin.x * 0.3;
+      b.spin.x *= -0.5;
+      if (impact > 0.5) playCushion(impact);
+    }
+    if (b.y + BALL_R > PLAY_B) {
+      b.y = PLAY_B - BALL_R;
+      const impact = Math.abs(b.vy);
+      b.vy = -b.vy * RESTITUTION_CUSHION;
+      b.vx += b.spin.x * 0.3;
+      b.spin.x *= -0.5;
+      if (impact > 0.5) playCushion(impact);
+    }
+
+    // Pocket capture
+    for (const p of pockets) {
+      const d = Math.hypot(b.x - p.x, b.y - p.y);
+      if (d < p.r - 2) {
+        b.inPlay = false;
+        b.vx = b.vy = 0;
+        onBallPocketed(b);
+        playPocket();
+        break;
+      } else if (d < p.r + BALL_R * 0.6) {
+        const pull = 0.04 * (1 - (d - p.r + 2) / (BALL_R * 0.6 + 2));
+        if (pull > 0) {
+          b.vx += (p.x - b.x) / d * pull;
+          b.vy += (p.y - b.y) / d * pull;
+        }
+      }
+    }
+  }
+
+  // Ball-ball collisions with throw effect
+  for (let i = 0; i < balls.length; i++) {
+    for (let j = i+1; j < balls.length; j++) {
+      const a = balls[i], b = balls[j];
+      if (!a.inPlay || !b.inPlay) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = BALL_R * 2;
+      if (dist < minDist && dist > 0.001) {
+        const nx = dx / dist, ny = dy / dist;
+
+        // Separate
+        const overlap = minDist - dist;
+        a.x -= nx * overlap * 0.5;
+        a.y -= ny * overlap * 0.5;
+        b.x += nx * overlap * 0.5;
+        b.y += ny * overlap * 0.5;
+
+        // Relative velocity
+        const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+        const velAlongNormal = rvx * nx + rvy * ny;
+        if (velAlongNormal > 0) continue;
+
+        if (firstHit === null) {
+          if (a.num === 0) firstHit = b.num;
+          else if (b.num === 0) firstHit = a.num;
+        }
+
+        // Elastic collision
+        const jImpulse = -(1 + RESTITUTION_BALL) * velAlongNormal / 2;
+        const ix = jImpulse * nx, iy = jImpulse * ny;
+        a.vx -= ix; a.vy -= iy;
+        b.vx += ix; b.vy += iy;
+
+        // THROW EFFECT: friction during contact changes object ball direction
+        const tangentX = -ny, tangentY = nx;
+        const relTangentVel = rvx * tangentX + rvy * tangentY;
+        const throwForce = relTangentVel * THROW_FACTOR;
+        b.vx += tangentX * throwForce;
+        b.vy += tangentY * throwForce;
+
+        // Spin transfer
+        if (a.num === 0) {
+          // Cue ball spin transfers to object ball
+          b.spin.x = a.spin.x * 0.3;
+          b.spin.y = a.spin.y * 0.3;
+          a.spin.x *= 0.5;
+          a.spin.y *= 0.5;
+        }
+
+        const impactSpeed = Math.abs(velAlongNormal);
+        if (impactSpeed > 0.3) playHit(impactSpeed);
+      }
+    }
+  }
+}
+
+function update() {
+  if (!moving && !aiming) return;
+
+  const subDt = 1 / SUBSTEPS;
+  for (let s = 0; s < SUBSTEPS; s++) {
+    physicsStep(subDt);
+  }
+
+  let anyMoving = false;
+  for (const b of balls) {
+    if (!b.inPlay) continue;
+    const speed = Math.hypot(b.vx, b.vy);
+    if (speed > MIN_SPEED) { anyMoving = true; break; }
+    if (speed > 0 && speed <= MIN_SPEED) { b.vx = b.vy = 0; }
+  }
+
+  if (!anyMoving && !aiming && !gameOver && !ballInHand) {
+    moving = false;
+    endTurn();
+  }
+}
+
+function onBallPocketed(b) {
+  if (b.num === 0) scratchThisTurn = true;
+  else pocketedThisTurn.push(b.num);
+}
+
+function endTurn() {
+  if (gameOver) return;
+
+  const cue = balls[0];
+  let switchTurn = true;
+  let foul = false;
+  let msg = '';
+
+  const eightPocketed = pocketedThisTurn.includes(8);
+
+  if (eightPocketed) {
+    const myType = playerTypes[currentPlayer];
+    const myBallsLeft = balls.filter(b => b.inPlay && b.num !== 0 && b.num !== 8 &&
+      (myType === 'solid' ? b.num <= 7 : b.num >= 9));
+    if (myBallsLeft.length === 0 && !scratchThisTurn && myType !== null) {
+      msg = `🏆 Player ${currentPlayer} wins! Legal 8-ball.`;
+    } else {
+      const winner = currentPlayer === 1 ? 2 : 1;
+      msg = `💀 Player ${currentPlayer} loses — illegal 8-ball. Player ${winner} wins!`;
+    }
+    gameOver = true;
+    setMsg(msg);
+    updateUI();
+    return;
+  }
+
+  if (playerTypes[1] === null && pocketedThisTurn.length > 0 && !breakShot) {
+    const first = pocketedThisTurn.find(n => n !== 8);
+    if (first !== undefined) {
+      playerTypes[currentPlayer] = first <= 7 ? 'solid' : 'stripe';
+      playerTypes[currentPlayer === 1 ? 2 : 1] = first <= 7 ? 'stripe' : 'solid';
+      msg += `Player ${currentPlayer} is ${playerTypes[currentPlayer]}s. `;
+    }
+  }
+
+  if (scratchThisTurn) {
+    foul = true;
+    msg += 'Scratch. ';
+  }
+
+  if (firstHit === null && !scratchThisTurn) {
+    foul = true;
+    msg += 'No ball contacted. ';
+  }
+
+  if (firstHit !== null && playerTypes[currentPlayer] !== null && !breakShot) {
+    const myType = playerTypes[currentPlayer];
+    const myBallsLeft = balls.filter(b => b.inPlay && b.num !== 0 && b.num !== 8 &&
+      (myType === 'solid' ? b.num <= 7 : b.num >= 9));
+    if (myBallsLeft.length > 0) {
+      const correct = myType === 'solid' ? (firstHit <= 7) : (firstHit >= 9);
+      if (!correct && firstHit !== 8) {
+        foul = true;
+        msg += 'Wrong ball first. ';
+      }
+    }
+  }
+
+  const myType = playerTypes[currentPlayer];
+  let pocketedOwn = false;
+  if (myType !== null) {
+    pocketedOwn = pocketedThisTurn.some(n => myType === 'solid' ? (n <= 7) : (n >= 9));
+  } else if (breakShot) {
+    pocketedOwn = pocketedThisTurn.length > 0;
+  }
+
+  if (foul || !pocketedOwn) {
+    switchTurn = true;
+  } else {
+    switchTurn = false;
+    if (!msg) msg = `Good shot. Player ${currentPlayer} continues.`;
+  }
+
+  if (scratchThisTurn) {
+    cue.inPlay = true;
+    cue.x = PLAY_L + PLAY_W * 0.25;
+    cue.y = PLAY_T + PLAY_H / 2;
+    cue.vx = cue.vy = 0;
+    cue.spin = { x: 0, y: 0 };
+    let tries = 0;
+    while (tries < 100 && balls.some(b => b !== cue && b.inPlay &&
+      Math.hypot(b.x - cue.x, b.y - cue.y) < BALL_R*2 + 1)) {
+      cue.y += 15;
+      if (cue.y > PLAY_B - BALL_R) { cue.y = PLAY_T + BALL_R; cue.x += 20; }
+      tries++;
+    }
+  }
+
+  if (switchTurn) {
+    currentPlayer = currentPlayer === 1 ? 2 : 1;
+    if (!msg) msg = `Player ${currentPlayer}'s turn.`;
+    else msg += `Player ${currentPlayer}'s turn.`;
+  }
+
+  if (scratchThisTurn) {
+    ballInHand = true;
+    msg += ' Ball in hand.';
+  }
+
+  pocketedThisTurn = [];
+  scratchThisTurn = false;
+  firstHit = null;
+  breakShot = false;
+
+  setMsg(msg);
+  updateUI();
+}
+
+// ===== INPUT =====
+function getMousePos(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (W / rect.width),
+    y: (e.clientY - rect.top) * (H / rect.height)
+  };
+}
+
+canvas.addEventListener('mousedown', e => {
+  initAudio();
+  if (moving || gameOver) return;
+  const m = getMousePos(e);
+  const cue = balls[0];
+
+  if (ballInHand && cue.inPlay) {
+    const valid = !balls.some(b => b !== cue && b.inPlay &&
+      Math.hypot(b.x - m.x, b.y - m.y) < BALL_R*2 + 1);
+    const inTable = m.x > PLAY_L + BALL_R && m.x < PLAY_R - BALL_R &&
+                    m.y > PLAY_T + BALL_R && m.y < PLAY_B - BALL_R;
+    if (valid && inTable) {
+      cue.x = m.x; cue.y = m.y;
+      ballInHand = false;
+      setMsg(`Player ${currentPlayer}'s turn — aim and shoot`);
+    }
+    return;
+  }
+
+  if (!cue.inPlay) return;
+  const d = Math.hypot(m.x - cue.x, m.y - cue.y);
+  if (d < 80) {
+    aiming = true;
+    aimStart = {x: cue.x, y: cue.y};
+    aimCurrent = m;
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const m = getMousePos(e);
+  if (ballInHand && !moving) {
+    const cue = balls[0];
+    const inTable = m.x > PLAY_L + BALL_R && m.x < PLAY_R - BALL_R &&
+                    m.y > PLAY_T + BALL_R && m.y < PLAY_B - BALL_R;
+    if (inTable) { cue.x = m.x; cue.y = m.y; }
+    return;
+  }
+  if (!aiming) return;
+  aimCurrent = m;
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (!aiming) return;
+  const cue = balls[0];
+  const dx = aimStart.x - aimCurrent.x;
+  const dy = aimStart.y - aimCurrent.y;
+  const power = Math.min(Math.hypot(dx, dy), 220);
+  if (power > 8) {
+    const angle = Math.atan2(dy, dx);
+    const speed = (power / 220) * 28;
+    cue.vx = Math.cos(angle) * speed;
+    cue.vy = Math.sin(angle) * speed;
+    
+    // Apply spin from cueSpin
+    cue.spin = { x: cueSpin.x, y: cueSpin.y };
+    
+    moving = true;
+    pocketedThisTurn = [];
+    scratchThisTurn = false;
+    firstHit = null;
+  }
+  aiming = false;
+});
+
+// Spin control
+const spinCtrl = document.getElementById('spinCtrl');
+const spinDot = document.getElementById('spinDot');
+
+spinCtrl.addEventListener('mousedown', e => {
+  e.stopPropagation();
+  const rect = spinCtrl.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  
+  // Calculate spin from click position
+  const dx = (x - centerX) / centerX; // -1 to 1
+  const dy = (y - centerY) / centerY; // -1 to 1
+  
+  // Clamp to circle
+  const dist = Math.hypot(dx, dy);
+  if (dist > 1) {
+    cueSpin.x = (dx / dist) * 0.8;
+    cueSpin.y = (dy / dist) * 0.8;
+  } else {
+    cueSpin.x = dx * 0.8;
+    cueSpin.y = dy * 0.8;
+  }
+  
+  updateSpinIndicator();
+});
+
+function updateSpinIndicator() {
+  const dotX = 50 + cueSpin.x * 20;
+  const dotY = 50 + cueSpin.y * 20;
+  spinDot.style.left = dotX + '%';
+  spinDot.style.top = dotY + '%';
+}
+
+// Touch support
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  canvas.dispatchEvent(new MouseEvent('mousedown', {clientX: t.clientX, clientY: t.clientY}));
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  canvas.dispatchEvent(new MouseEvent('mousemove', {clientX: t.clientX, clientY: t.clientY}));
+});
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  canvas.dispatchEvent(new MouseEvent('mouseup', {}));
+});
+
+// ===== MAIN LOOP =====
+function loop() {
+  drawTable();
+  if (aiming) drawAim();
+  const sorted = [...balls].filter(b => b.inPlay).sort((a,b) => a.y - b.y);
+  for (const b of sorted) drawBall3D(b);
+  drawBallInHandIndicator();
+  update();
+  requestAnimationFrame(loop);
+}
+
+resetGame();
+loop();
+</script>
+</body>
+</html>
