@@ -88,6 +88,7 @@
     font-size: 12px;
     font-family: inherit;
     letter-spacing: 2px;
+    transition: background 0.2s;
   }
   button:hover { background: linear-gradient(180deg, #a00000, #600000); }
   .spin-control {
@@ -106,7 +107,9 @@
     position: relative;
     cursor: pointer;
     box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+    transition: transform 0.1s;
   }
+  .spin-indicator:hover { transform: scale(1.05); }
   .spin-dot {
     width: 8px;
     height: 8px;
@@ -117,6 +120,7 @@
     left: 50%;
     transform: translate(-50%, -50%);
     box-shadow: 0 0 5px rgba(231,76,60,0.8);
+    pointer-events: none;
   }
 </style>
 </head>
@@ -134,7 +138,7 @@
   </div>
   <canvas id="game" width="1000" height="520"></canvas>
   <div class="spin-control">
-    <div class="spin-indicator" id="spinCtrl">
+    <div class="spin-indicator" id="spinCtrl" title="Click to set cue ball spin (english)">
       <div class="spin-dot" id="spinDot"></div>
     </div>
     <span>Click cue ball to set spin • Drag backward to shoot</span>
@@ -191,8 +195,14 @@ const BALL_COLORS = {
 // ===== AUDIO =====
 let audioCtx;
 function initAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
 }
+
 function playHit(intensity) {
   if (!audioCtx) return;
   const now = audioCtx.currentTime;
@@ -211,6 +221,7 @@ function playHit(intensity) {
   osc.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
   osc.start(now); osc.stop(now + 0.16);
 }
+
 function playPocket() {
   if (!audioCtx) return;
   const now = audioCtx.currentTime;
@@ -224,6 +235,7 @@ function playPocket() {
   osc.connect(gain); gain.connect(audioCtx.destination);
   osc.start(now); osc.stop(now + 0.36);
 }
+
 function playCushion(intensity) {
   if (!audioCtx) return;
   const now = audioCtx.currentTime;
@@ -267,9 +279,9 @@ function createBalls() {
     y: PLAY_T + PLAY_H / 2,
     vx: 0, vy: 0,
     num: 0, inPlay: true,
-    spin: { x: 0, y: 0 }, // side, top/back
-    rotX: 0, rotY: 0, rotZ: 0, // 3D rotation angles
-    angularVel: { x: 0, y: 0, z: 0 } // angular velocity
+    spin: { x: 0, y: 0 },
+    rotX: 0, rotY: 0, rotZ: 0,
+    angularVel: { x: 0, y: 0, z: 0 }
   });
 
   const footX = PLAY_L + PLAY_W * 0.73;
@@ -341,7 +353,6 @@ function setMsg(text) { document.getElementById('msg').textContent = text; }
 
 // ===== 3D DRAWING =====
 function drawTable() {
-  // Wood frame with 3D bevel
   const woodGrad = ctx.createLinearGradient(0, 0, 0, H);
   woodGrad.addColorStop(0, '#6a4428');
   woodGrad.addColorStop(0.3, '#8a5a38');
@@ -350,7 +361,6 @@ function drawTable() {
   ctx.fillStyle = woodGrad;
   ctx.fillRect(0, 0, W, H);
 
-  // Wood grain
   ctx.strokeStyle = 'rgba(30,15,5,0.25)';
   ctx.lineWidth = 1;
   for (let i = 0; i < 25; i++) {
@@ -361,18 +371,15 @@ function drawTable() {
     ctx.stroke();
   }
 
-  // Inner frame shadow
   ctx.fillStyle = '#1a0a04';
   ctx.fillRect(RAIL-8, RAIL-8, W-2*(RAIL-8), H-2*(RAIL-8));
 
-  // Felt with cloth texture
   const feltGrad = ctx.createRadialGradient(W/2, H/2, 100, W/2, H/2, 600);
   feltGrad.addColorStop(0, '#1e8a52');
   feltGrad.addColorStop(1, '#0d5a33');
   ctx.fillStyle = feltGrad;
   ctx.fillRect(PLAY_L, PLAY_T, PLAY_W, PLAY_H);
 
-  // Cloth nap (directional texture)
   ctx.save();
   ctx.globalAlpha = 0.06;
   for (let i = 0; i < 300; i++) {
@@ -383,7 +390,6 @@ function drawTable() {
   }
   ctx.restore();
 
-  // Cushion 3D effect
   ctx.strokeStyle = 'rgba(255,220,150,0.2)';
   ctx.lineWidth = 3;
   ctx.strokeRect(PLAY_L+1, PLAY_T+1, PLAY_W-2, PLAY_H-2);
@@ -391,15 +397,12 @@ function drawTable() {
   ctx.lineWidth = 2;
   ctx.strokeRect(PLAY_L, PLAY_T, PLAY_W, PLAY_H);
 
-  // Pockets with depth
-  pockets.forEach((p, i) => {
-    // Outer rim
+  pockets.forEach((p) => {
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.r + 4, 0, Math.PI*2);
     ctx.fillStyle = '#0a0402';
     ctx.fill();
     
-    // Inner hole with gradient depth
     const pg = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
     pg.addColorStop(0, '#000');
     pg.addColorStop(0.7, '#0a0402');
@@ -409,13 +412,11 @@ function drawTable() {
     ctx.fillStyle = pg;
     ctx.fill();
     
-    // Highlight rim
     ctx.strokeStyle = 'rgba(212,175,55,0.3)';
     ctx.lineWidth = 1;
     ctx.stroke();
   });
 
-  // Head string
   ctx.strokeStyle = 'rgba(255,255,255,0.1)';
   ctx.setLineDash([4, 6]);
   ctx.lineWidth = 1;
@@ -425,13 +426,11 @@ function drawTable() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Foot spot
   ctx.beginPath();
   ctx.arc(PLAY_L + PLAY_W * 0.73, PLAY_T + PLAY_H/2, 2.5, 0, Math.PI*2);
   ctx.fillStyle = 'rgba(255,255,255,0.2)';
   ctx.fill();
 
-  // Diamonds
   ctx.fillStyle = 'rgba(212,175,55,0.6)';
   for (let i = 1; i < 4; i++) {
     const x = PLAY_L + (PLAY_W * i / 4);
@@ -455,20 +454,16 @@ function drawDiamond(x, y, s) {
   ctx.fill();
 }
 
-// 3D Ball rendering with proper sphere shading
 function drawBall3D(b) {
   if (!b.inPlay) return;
 
   const x = b.x, y = b.y;
-
-  // Calculate light direction to ball
   const dx = LIGHT.x - x;
   const dy = LIGHT.y - y;
   const dz = LIGHT.z;
   const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
   const lightDir = { x: dx/dist, y: dy/dist, z: dz/dist };
 
-  // Shadow (projected based on light)
   const shadowOffsetX = (x - LIGHT.x) * 0.02;
   const shadowOffsetY = (y - LIGHT.y) * 0.02 + 5;
   ctx.beginPath();
@@ -477,41 +472,29 @@ function drawBall3D(b) {
   ctx.fill();
 
   if (b.num === 0) {
-    // Cue ball - pearlescent white with 3D shading
     drawSphere(x, y, BALL_R, '#ffffff', '#e8e8e8', '#a0a0a0', lightDir, b);
   } else {
     const isStripe = b.num >= 9;
     const color = BALL_COLORS[b.num];
 
     if (isStripe) {
-      // White base with 3D shading
       drawSphere(x, y, BALL_R, '#ffffff', '#e0e0e0', '#909090', lightDir, b);
-      
-      // Colored stripe (rotates with ball)
       ctx.save();
       ctx.beginPath();
       ctx.arc(x, y, BALL_R, 0, Math.PI*2);
       ctx.clip();
-      
-      // Rotate stripe based on ball rotation
       ctx.translate(x, y);
       ctx.rotate(b.rotZ);
       
-      // Draw stripe with 3D shading
       const stripeGrad = ctx.createLinearGradient(0, -BALL_R*0.6, 0, BALL_R*0.6);
       stripeGrad.addColorStop(0, lighten(color, 30));
       stripeGrad.addColorStop(0.5, color);
       stripeGrad.addColorStop(1, darken(color, 30));
       ctx.fillStyle = stripeGrad;
       ctx.fillRect(-BALL_R, -BALL_R*0.55, BALL_R*2, BALL_R*1.1);
-      
       ctx.restore();
       
-      // Re-apply 3D shading on top
-      const highlight = ctx.createRadialGradient(
-        x - BALL_R*0.3, y - BALL_R*0.3, 0,
-        x, y, BALL_R
-      );
+      const highlight = ctx.createRadialGradient(x - BALL_R*0.3, y - BALL_R*0.3, 0, x, y, BALL_R);
       highlight.addColorStop(0, 'rgba(255,255,255,0.4)');
       highlight.addColorStop(0.5, 'rgba(255,255,255,0)');
       highlight.addColorStop(1, 'rgba(0,0,0,0.3)');
@@ -520,11 +503,9 @@ function drawBall3D(b) {
       ctx.arc(x, y, BALL_R, 0, Math.PI*2);
       ctx.fill();
     } else {
-      // Solid ball with 3D shading
       drawSphere(x, y, BALL_R, lighten(color, 40), color, darken(color, 50), lightDir, b);
     }
 
-    // Number circle (3D embossed look)
     const numR = BALL_R * 0.45;
     ctx.beginPath();
     ctx.arc(x, y, numR, 0, Math.PI*2);
@@ -534,19 +515,15 @@ function drawBall3D(b) {
     ctx.fillStyle = numGrad;
     ctx.fill();
     
-    // Number shadow
     ctx.fillStyle = 'rgba(0,0,0,0.2)';
     ctx.font = 'bold 10px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(b.num, x + 0.5, y + 1);
-    
-    // Number
     ctx.fillStyle = '#000';
     ctx.fillText(b.num, x, y);
   }
 
-  // Specular highlight (moves with rotation)
   const specX = x - BALL_R*0.4 + Math.sin(b.rotZ) * 2;
   const specY = y - BALL_R*0.4 + Math.cos(b.rotZ) * 2;
   const specGrad = ctx.createRadialGradient(specX, specY, 0, specX, specY, BALL_R*0.25);
@@ -559,16 +536,13 @@ function drawBall3D(b) {
   ctx.fill();
 }
 
-function drawSphere(x, y, r, lightColor, midColor, darkColor, lightDir, ball) {
-  // Main sphere gradient based on light direction
+function drawSphere(x, y, r, lightColor, midColor, darkColor, lightDir) {
   const highlightX = x - r * 0.35 * lightDir.x;
   const highlightY = y - r * 0.35 * lightDir.y;
-  
   const grad = ctx.createRadialGradient(highlightX, highlightY, 0, x, y, r);
   grad.addColorStop(0, lightColor);
   grad.addColorStop(0.5, midColor);
   grad.addColorStop(1, darkColor);
-  
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI*2);
@@ -594,7 +568,6 @@ function drawAim() {
   const angle = Math.atan2(dy, dx);
   const dirX = Math.cos(angle), dirY = Math.sin(angle);
 
-  // Ghost-ball prediction
   let hitBall = null, hitDist = Infinity, hitX, hitY;
   for (const b of balls) {
     if (b.num === 0 || !b.inPlay) continue;
@@ -615,7 +588,6 @@ function drawAim() {
     }
   }
 
-  // Aim line
   ctx.strokeStyle = 'rgba(255,255,255,0.4)';
   ctx.setLineDash([3, 5]);
   ctx.lineWidth = 1;
@@ -626,7 +598,6 @@ function drawAim() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Ghost ball
   if (hitBall) {
     ctx.strokeStyle = 'rgba(255,255,255,0.3)';
     ctx.lineWidth = 1;
@@ -634,21 +605,34 @@ function drawAim() {
     ctx.arc(hitX, hitY, BALL_R, 0, Math.PI*2);
     ctx.stroke();
     
-    // Target direction
     const tdx = hitBall.x - hitX, tdy = hitBall.y - hitY;
     const td = Math.hypot(tdx, tdy);
     if (td > 0) {
-      ctx.strokeStyle = 'rgba(255,200,100,0.5)';
+      ctx.strokeStyle = 'rgba(255,200,100,0.6)';
       ctx.setLineDash([2, 4]);
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(hitBall.x, hitBall.y);
-      ctx.lineTo(hitBall.x + (tdx/td) * 80, hitBall.y + (tdy/td) * 80);
+      ctx.lineTo(hitBall.x + (tdx/td) * 100, hitBall.y + (tdy/td) * 100);
       ctx.stroke();
       ctx.setLineDash([]);
     }
+
+    // Tangent line (90-degree rule)
+    const nx = tdx / td, ny = tdy / td;
+    const tx = -ny, ty = nx;
+    
+    ctx.strokeStyle = 'rgba(100,200,255,0.5)';
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(hitX, hitY);
+    const spinAdjust = cueSpin.y * 0.3; 
+    ctx.lineTo(hitX + (tx + nx * spinAdjust) * 80, hitY + (ty + ny * spinAdjust) * 80);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
-  // 3D Cue stick
   const stickLen = 280;
   const pullBack = (power / 220) * 60;
   const tipOffset = BALL_R + 5 + pullBack;
@@ -657,7 +641,6 @@ function drawAim() {
   const endX = tipX - dirX * stickLen;
   const endY = tipY - dirY * stickLen;
 
-  // Stick shadow
   ctx.strokeStyle = 'rgba(0,0,0,0.5)';
   ctx.lineWidth = 8;
   ctx.lineCap = 'round';
@@ -666,7 +649,6 @@ function drawAim() {
   ctx.lineTo(endX + 2, endY + 4);
   ctx.stroke();
 
-  // Stick body with 3D taper
   const shaftGrad = ctx.createLinearGradient(tipX, tipY, endX, endY);
   shaftGrad.addColorStop(0, '#f0d8a8');
   shaftGrad.addColorStop(0.2, '#e8c896');
@@ -679,7 +661,6 @@ function drawAim() {
   ctx.lineTo(endX, endY);
   ctx.stroke();
 
-  // Highlight on stick
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -687,7 +668,6 @@ function drawAim() {
   ctx.lineTo(endX, endY);
   ctx.stroke();
 
-  // Ferrule
   ctx.strokeStyle = '#f5f0e0';
   ctx.lineWidth = 6;
   ctx.beginPath();
@@ -695,7 +675,6 @@ function drawAim() {
   ctx.lineTo(tipX - dirX * 7, tipY - dirY * 7);
   ctx.stroke();
 
-  // Tip
   ctx.strokeStyle = '#2a5a8a';
   ctx.lineWidth = 6;
   ctx.beginPath();
@@ -703,7 +682,6 @@ function drawAim() {
   ctx.lineTo(tipX - dirX * 2, tipY - dirY * 2);
   ctx.stroke();
 
-  // Power meter
   ctx.fillStyle = 'rgba(0,0,0,0.7)';
   ctx.fillRect(20, H - 32, 220, 16);
   const p = power / 220;
@@ -744,29 +722,23 @@ function physicsStep(dt) {
 
     const speed = Math.hypot(b.vx, b.vy);
     
-    // Apply spin effects (swerve/curve for cue ball)
-    if (b.num === 0 && (b.spin.x !== 0 || b.spin.y !== 0)) {
-      // Side spin causes curve (swerve)
+    if (b.num === 0 && (b.spin.x !== 0 || b.spin.y !== 0) && speed > 0.5) {
       const sideSpinForce = b.spin.x * 0.0008;
       b.vx += -b.vy * sideSpinForce;
       b.vy += b.vx * sideSpinForce;
       
-      // Top/back spin affects speed
       const forwardSpinForce = b.spin.y * 0.001;
-      b.vx += b.vx / speed * forwardSpinForce;
-      b.vy += b.vy / speed * forwardSpinForce;
+      b.vx += (b.vx / speed) * forwardSpinForce;
+      b.vy += (b.vy / speed) * forwardSpinForce;
     }
 
-    // Rolling vs sliding friction
     if (speed > 2) {
-      // Sliding friction (higher)
       const decel = SLIDING_FRICTION * dt;
       const newSpeed = Math.max(0, speed - decel);
       const ratio = newSpeed / speed;
       b.vx *= ratio;
       b.vy *= ratio;
     } else {
-      // Rolling friction (lower)
       const decel = ROLLING_FRICTION * dt;
       const newSpeed = Math.max(0, speed - decel);
       if (newSpeed === 0) {
@@ -778,37 +750,33 @@ function physicsStep(dt) {
       }
     }
 
-    // Spin decay
     b.spin.x *= SPIN_FRICTION;
     b.spin.y *= SPIN_FRICTION;
     if (Math.abs(b.spin.x) < 0.01) b.spin.x = 0;
     if (Math.abs(b.spin.y) < 0.01) b.spin.y = 0;
 
-    // Update position
+    // Position update (kept frame-based for original snappy feel)
     b.x += b.vx;
     b.y += b.vy;
 
-    // Update 3D rotation based on velocity
     if (speed > MIN_SPEED) {
       const rotSpeed = speed * 0.08;
       b.rotZ += rotSpeed * dt;
-      // Calculate rotation axis from velocity direction
       const velAngle = Math.atan2(b.vy, b.vx);
       b.rotX = Math.cos(velAngle) * rotSpeed * dt;
       b.rotY = Math.sin(velAngle) * rotSpeed * dt;
     }
 
-    // Cushion collisions with spin transfer
-    if (b.x - BALL_R < PLAY_L) {
+    // Cushion collisions (FIXED: only bounce if moving TOWARDS the wall to prevent sticking)
+    if (b.x - BALL_R < PLAY_L && b.vx < 0) {
       b.x = PLAY_L + BALL_R;
       const impact = Math.abs(b.vx);
       b.vx = -b.vx * RESTITUTION_CUSHION;
-      // Side spin affects bounce angle
       b.vy += b.spin.x * 0.3;
-      b.spin.x *= -0.5; // Spin reversal on cushion
+      b.spin.x *= -0.5;
       if (impact > 0.5) playCushion(impact);
     }
-    if (b.x + BALL_R > PLAY_R) {
+    if (b.x + BALL_R > PLAY_R && b.vx > 0) {
       b.x = PLAY_R - BALL_R;
       const impact = Math.abs(b.vx);
       b.vx = -b.vx * RESTITUTION_CUSHION;
@@ -816,7 +784,7 @@ function physicsStep(dt) {
       b.spin.x *= -0.5;
       if (impact > 0.5) playCushion(impact);
     }
-    if (b.y - BALL_R < PLAY_T) {
+    if (b.y - BALL_R < PLAY_T && b.vy < 0) {
       b.y = PLAY_T + BALL_R;
       const impact = Math.abs(b.vy);
       b.vy = -b.vy * RESTITUTION_CUSHION;
@@ -824,7 +792,7 @@ function physicsStep(dt) {
       b.spin.x *= -0.5;
       if (impact > 0.5) playCushion(impact);
     }
-    if (b.y + BALL_R > PLAY_B) {
+    if (b.y + BALL_R > PLAY_B && b.vy > 0) {
       b.y = PLAY_B - BALL_R;
       const impact = Math.abs(b.vy);
       b.vy = -b.vy * RESTITUTION_CUSHION;
@@ -833,7 +801,6 @@ function physicsStep(dt) {
       if (impact > 0.5) playCushion(impact);
     }
 
-    // Pocket capture
     for (const p of pockets) {
       const d = Math.hypot(b.x - p.x, b.y - p.y);
       if (d < p.r - 2) {
@@ -852,7 +819,6 @@ function physicsStep(dt) {
     }
   }
 
-  // Ball-ball collisions with throw effect
   for (let i = 0; i < balls.length; i++) {
     for (let j = i+1; j < balls.length; j++) {
       const a = balls[i], b = balls[j];
@@ -863,14 +829,12 @@ function physicsStep(dt) {
       if (dist < minDist && dist > 0.001) {
         const nx = dx / dist, ny = dy / dist;
 
-        // Separate
         const overlap = minDist - dist;
         a.x -= nx * overlap * 0.5;
         a.y -= ny * overlap * 0.5;
         b.x += nx * overlap * 0.5;
         b.y += ny * overlap * 0.5;
 
-        // Relative velocity
         const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
         const velAlongNormal = rvx * nx + rvy * ny;
         if (velAlongNormal > 0) continue;
@@ -880,22 +844,18 @@ function physicsStep(dt) {
           else if (b.num === 0) firstHit = a.num;
         }
 
-        // Elastic collision
         const jImpulse = -(1 + RESTITUTION_BALL) * velAlongNormal / 2;
         const ix = jImpulse * nx, iy = jImpulse * ny;
         a.vx -= ix; a.vy -= iy;
         b.vx += ix; b.vy += iy;
 
-        // THROW EFFECT: friction during contact changes object ball direction
         const tangentX = -ny, tangentY = nx;
         const relTangentVel = rvx * tangentX + rvy * tangentY;
         const throwForce = relTangentVel * THROW_FACTOR;
         b.vx += tangentX * throwForce;
         b.vy += tangentY * throwForce;
 
-        // Spin transfer
         if (a.num === 0) {
-          // Cue ball spin transfers to object ball
           b.spin.x = a.spin.x * 0.3;
           b.spin.y = a.spin.y * 0.3;
           a.spin.x *= 0.5;
@@ -934,6 +894,33 @@ function update() {
 function onBallPocketed(b) {
   if (b.num === 0) scratchThisTurn = true;
   else pocketedThisTurn.push(b.num);
+}
+
+function findValidCueBallPosition() {
+  const cue = balls[0];
+  const step = BALL_R * 2.5;
+  const headStringX = PLAY_L + PLAY_W * 0.25;
+  
+  for (let y = PLAY_T + BALL_R; y <= PLAY_B - BALL_R; y += step) {
+    for (let x = PLAY_L + BALL_R; x <= PLAY_R - BALL_R; x += step) {
+      if (breakShot && scratchThisTurn && x > headStringX) continue;
+      
+      let overlap = false;
+      for (const b of balls) {
+        if (b === cue || !b.inPlay) continue;
+        if (Math.hypot(b.x - x, b.y - y) < BALL_R * 2 + 2) {
+          overlap = true;
+          break;
+        }
+      }
+      if (!overlap) {
+        cue.x = x;
+        cue.y = y;
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function endTurn() {
@@ -1011,17 +998,9 @@ function endTurn() {
 
   if (scratchThisTurn) {
     cue.inPlay = true;
-    cue.x = PLAY_L + PLAY_W * 0.25;
-    cue.y = PLAY_T + PLAY_H / 2;
     cue.vx = cue.vy = 0;
     cue.spin = { x: 0, y: 0 };
-    let tries = 0;
-    while (tries < 100 && balls.some(b => b !== cue && b.inPlay &&
-      Math.hypot(b.x - cue.x, b.y - cue.y) < BALL_R*2 + 1)) {
-      cue.y += 15;
-      if (cue.y > PLAY_B - BALL_R) { cue.y = PLAY_T + BALL_R; cue.x += 20; }
-      tries++;
-    }
+    findValidCueBallPosition();
   }
 
   if (switchTurn) {
@@ -1064,7 +1043,10 @@ canvas.addEventListener('mousedown', e => {
       Math.hypot(b.x - m.x, b.y - m.y) < BALL_R*2 + 1);
     const inTable = m.x > PLAY_L + BALL_R && m.x < PLAY_R - BALL_R &&
                     m.y > PLAY_T + BALL_R && m.y < PLAY_B - BALL_R;
-    if (valid && inTable) {
+    const headStringX = PLAY_L + PLAY_W * 0.25;
+    const behindHeadString = breakShot ? (m.x <= headStringX) : true;
+
+    if (valid && inTable && behindHeadString) {
       cue.x = m.x; cue.y = m.y;
       ballInHand = false;
       setMsg(`Player ${currentPlayer}'s turn — aim and shoot`);
@@ -1105,10 +1087,7 @@ canvas.addEventListener('mouseup', e => {
     const speed = (power / 220) * 28;
     cue.vx = Math.cos(angle) * speed;
     cue.vy = Math.sin(angle) * speed;
-    
-    // Apply spin from cueSpin
     cue.spin = { x: cueSpin.x, y: cueSpin.y };
-    
     moving = true;
     pocketedThisTurn = [];
     scratchThisTurn = false;
@@ -1117,24 +1096,22 @@ canvas.addEventListener('mouseup', e => {
   aiming = false;
 });
 
-// Spin control
 const spinCtrl = document.getElementById('spinCtrl');
 const spinDot = document.getElementById('spinDot');
 
 spinCtrl.addEventListener('mousedown', e => {
   e.stopPropagation();
+  initAudio();
   const rect = spinCtrl.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
   const centerX = rect.width / 2;
   const centerY = rect.height / 2;
   
-  // Calculate spin from click position
-  const dx = (x - centerX) / centerX; // -1 to 1
-  const dy = (y - centerY) / centerY; // -1 to 1
-  
-  // Clamp to circle
+  const dx = (x - centerX) / centerX;
+  const dy = (y - centerY) / centerY;
   const dist = Math.hypot(dx, dy);
+  
   if (dist > 1) {
     cueSpin.x = (dx / dist) * 0.8;
     cueSpin.y = (dy / dist) * 0.8;
@@ -1142,7 +1119,6 @@ spinCtrl.addEventListener('mousedown', e => {
     cueSpin.x = dx * 0.8;
     cueSpin.y = dy * 0.8;
   }
-  
   updateSpinIndicator();
 });
 
@@ -1153,24 +1129,24 @@ function updateSpinIndicator() {
   spinDot.style.top = dotY + '%';
 }
 
-// Touch support
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
   const t = e.touches[0];
   canvas.dispatchEvent(new MouseEvent('mousedown', {clientX: t.clientX, clientY: t.clientY}));
-});
+}, {passive: false});
 canvas.addEventListener('touchmove', e => {
   e.preventDefault();
   const t = e.touches[0];
   canvas.dispatchEvent(new MouseEvent('mousemove', {clientX: t.clientX, clientY: t.clientY}));
-});
+}, {passive: false});
 canvas.addEventListener('touchend', e => {
   e.preventDefault();
   canvas.dispatchEvent(new MouseEvent('mouseup', {}));
-});
+}, {passive: false});
 
 // ===== MAIN LOOP =====
 function loop() {
+  ctx.clearRect(0, 0, W, H);
   drawTable();
   if (aiming) drawAim();
   const sorted = [...balls].filter(b => b.inPlay).sort((a,b) => a.y - b.y);
